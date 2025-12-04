@@ -50,15 +50,21 @@ import requests
 import gradio as gr
 from dotenv import load_dotenv, find_dotenv
 
+# Load .env variables
 _ = load_dotenv(find_dotenv())
-hf_api_key = os.environ['HF_API_KEY']
-API_URL = os.environ['HF_API_NER_BASE']
+hf_api_key = "your_token"
+API_URL = "https://router.huggingface.co/hf-inference/models/dslim/bert-base-NER"
 
+
+# ---------------------------
+# HF API CALL
+# ---------------------------
 def get_completion(inputs, parameters=None, ENDPOINT_URL=API_URL):
     headers = {
         "Authorization": f"Bearer {hf_api_key}",
         "Content-Type": "application/json"
     }
+
     data = {"inputs": inputs}
     if parameters:
         data.update({"parameters": parameters})
@@ -66,57 +72,87 @@ def get_completion(inputs, parameters=None, ENDPOINT_URL=API_URL):
     response = requests.post(ENDPOINT_URL, headers=headers, data=json.dumps(data))
     text = response.content.decode("utf-8").strip()
 
-    # Handle extra data safely
     try:
-        # Try parsing as normal JSON
         return json.loads(text)
     except json.JSONDecodeError:
-        # If response contains multiple JSON objects, take the first valid one
-        parts = text.split("\n")
-        for part in parts:
+        for part in text.split("\n"):
             try:
                 return json.loads(part)
-            except Exception:
+            except:
                 continue
         raise ValueError(f"Invalid JSON returned from model: {text}")
 
-def merge_tokens(tokens):
-    merged_tokens = []
-    for token in tokens:
-        if merged_tokens and token['entity'].startswith('I-') and merged_tokens[-1]['entity'].endswith(token['entity'][2:]):
-            last = merged_tokens[-1]
-            last['word'] += token['word'].replace('##', '')
-            last['end'] = token['end']
-            last['score'] = (last['score'] + token['score']) / 2
-        else:
-            merged_tokens.append(token)
-    return merged_tokens
 
+# ---------------------------
+# TOKEN MERGING + FORMATTING FOR GRADIO
+# ---------------------------
+def format_entities_for_gradio(entities):
+    """
+    Converts HF NER output into the format required by Gradio HighlightedText.
+    Gradio expects: {"text": "...", "entities": [{"entity": "...", "start": x, "end": y}]}
+    """
+
+    formatted = []
+    for e in entities:
+        entity_type = e.get("entity", e.get("entity_group"))
+        if entity_type is None:
+            continue
+
+        start = e.get("start")
+        end = e.get("end")
+        if start is None or end is None:
+            continue
+
+        formatted.append({
+            "entity": entity_type,
+            "start": start,
+            "end": end
+        })
+
+    return formatted
+
+
+# ---------------------------
+# MAIN NER FUNCTION
+# ---------------------------
 def ner(input_text):
     output = get_completion(input_text)
+
     if not isinstance(output, list):
         raise ValueError(f"Unexpected model output: {output}")
-    merged_tokens = merge_tokens(output)
-    return {"text": input_text, "entities": merged_tokens}
 
+    entities = format_entities_for_gradio(output)
+
+    return {"text": input_text, "entities": entities}
+
+
+# ---------------------------
+# GRADIO UI
+# ---------------------------
 gr.close_all()
+
 demo = gr.Interface(
     fn=ner,
-    inputs=[gr.Textbox(label="Text to find entities", lines=2)],
-    outputs=[gr.HighlightedText(label="Text with entities")],
-    title="NER with dslim/bert-base-NER",
-    description="Find named entities using the dslim/bert-base-NER model via Hugging Face Inference API.",
-    allow_flagging="never",
+    inputs=gr.Textbox(label="Enter text", lines=3),
+    outputs=gr.HighlightedText(label="NER Result"),
+    title="NER Application – Fine-tuned BART Model",
+    description=(
+        "Prototype application for Named Entity Recognition using a fine-tuned BART model, "
+        "deployed with Gradio for evaluation and user interaction."
+    ),
     examples=[
-        "My name is rithik, I work at DeepLearningAI and live in Chennai.",
-        "rithik lives in Chennai and works at HuggingFace."
+        ["My name is Rithik and I live in Chennai."],
+        ["Google was founded by Larry Page and Sergey Brin."],
+        ["Prathik works at DeepLearningAI in Bangalore."]
     ]
 )
 
 demo.launch(share=True, server_port=int(os.environ.get("PORT3", 7860)))
+
 ```
 ### OUTPUT:
-<img width="1053" height="453" alt="Screenshot 2025-11-19 163456" src="https://github.com/user-attachments/assets/d851ce8c-835d-4245-9385-fcae93033a3e" />
+<img width="1681" height="675" alt="image" src="https://github.com/user-attachments/assets/e72aa17c-659b-4689-8570-fb53fe5f6ca5" />
+
 
 
 ### RESULT:
